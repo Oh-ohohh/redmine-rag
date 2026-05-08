@@ -3,13 +3,21 @@ import psycopg2
 from groq import Groq
 from dotenv import load_dotenv
 import os
+import streamlit as st
 
 load_dotenv()
 
-print("모델 로딩 중...")
-model = SentenceTransformer('paraphrase-multilingual-mpnet-base-v2')
+@st.cache_resource
+def load_model():
+    print("모델 로딩 중...")
+    return SentenceTransformer('paraphrase-multilingual-mpnet-base-v2')
 
-client = Groq(api_key=os.getenv('GROQ_API_KEY'))
+@st.cache_resource
+def load_client():
+    return Groq(api_key=os.getenv('GROQ_API_KEY'))
+
+model = load_model()
+client = load_client()
 
 DB_CONFIG = {
     'host': 'aws-1-ap-northeast-2.pooler.supabase.com',
@@ -28,7 +36,6 @@ def search(question, top_k=5, fetch_k=10):
     conn = get_conn()
     cursor = conn.cursor()
     
-    # 유사한 이슈 10개 가져오고 최신순 5개
     cursor.execute("""
         SELECT issue_id, subject, description, created_on
         FROM redmine_issues
@@ -38,7 +45,6 @@ def search(question, top_k=5, fetch_k=10):
     issues_raw = cursor.fetchall()
     issues = sorted(issues_raw, key=lambda x: x[3] or '', reverse=True)[:top_k]
     
-    # 유사한 댓글 10개 가져오고 최신순 5개
     cursor.execute("""
         SELECT j.issue_id, j.notes, j.created_on
         FROM redmine_journals j
