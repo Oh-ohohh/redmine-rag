@@ -14,7 +14,8 @@ def load_model():
 
 @st.cache_resource
 def load_client():
-    return Groq(api_key=os.getenv('GROQ_API_KEY'))
+    api_key = st.secrets.get("GROQ_API_KEY") or os.getenv('GROQ_API_KEY')
+    return Groq(api_key=api_key)
 
 model = load_model()
 client = load_client()
@@ -24,7 +25,7 @@ DB_CONFIG = {
     'port': 5432,
     'database': 'postgres',
     'user': 'postgres.nsexfujmsfchdwvqjtsy',
-    'password': os.getenv('SUPABASE_PASSWORD')
+    'password': st.secrets.get("SUPABASE_PASSWORD") or os.getenv('SUPABASE_PASSWORD')
 }
 
 def get_conn():
