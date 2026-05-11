@@ -82,15 +82,17 @@ def search(question, top_k=10, fetch_k=20):
 
     issues = combined[:10]
 
-    # 저널 벡터 검색
+    # 4. 찾은 이슈의 저널만 가져오기
+    issue_ids = [i[0] for i in issues]
     cursor.execute("""
         SELECT j.issue_id, j.notes, j.created_on
         FROM redmine_journals j
-        ORDER BY j.embedding <-> %s::vector
-        LIMIT %s
-    """, (str(vector), fetch_k))
-    journals_raw = cursor.fetchall()
-    journals = sorted(journals_raw, key=lambda x: x[2] or '', reverse=True)[:10]
+        WHERE j.issue_id = ANY(%s)
+        AND j.notes IS NOT NULL
+        AND j.notes != ''
+        ORDER BY j.created_on DESC
+    """, (issue_ids,))
+    journals = cursor.fetchall()
 
     conn.close()
     return issues, journals
@@ -120,7 +122,7 @@ def ask(question):
      * 단계별로 번호 매겨서 설명
      * 각 단계마다 구체적인 명령어나 설정값 포함
      * 주의사항도 함께 작성
-   - 📎 참고 이슈: 관련 이슈 번호 전체 목록
+   - 📎 참고 이슈: 반드시 위 '관련 이슈 데이터'에 있는 이슈 번호만 언급하세요
    - 💡 추가 팁: 재발 방지 방법이나 관련 주의사항
 4. 비슷한 사례 이슈도 함께 언급하세요
 5. 데이터에 없는 내용은 추측하지 말고 "관련 이슈를 찾지 못했습니다" 라고 하세요
