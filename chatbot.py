@@ -12,21 +12,22 @@ def load_model():
     print("모델 로딩 중...")
     return SentenceTransformer('paraphrase-multilingual-mpnet-base-v2')
 
-@st.cache_resource
-def load_client():
-    api_key = st.secrets.get("GROQ_API_KEY") or os.getenv('GROQ_API_KEY')
-    return Groq(api_key=api_key)
-
 model = load_model()
-client = load_client()
 
 DB_CONFIG = {
     'host': 'aws-1-ap-northeast-2.pooler.supabase.com',
     'port': 5432,
     'database': 'postgres',
     'user': 'postgres.nsexfujmsfchdwvqjtsy',
-    'password': st.secrets.get("SUPABASE_PASSWORD") or os.getenv('SUPABASE_PASSWORD')
+    'password': st.secrets.get("SUPABASE_PASSWORD") if hasattr(st, 'secrets') else os.getenv('SUPABASE_PASSWORD')
 }
+
+def get_client():
+    try:
+        api_key = st.secrets["GROQ_API_KEY"]
+    except:
+        api_key = os.getenv('GROQ_API_KEY')
+    return Groq(api_key=api_key)
 
 def get_conn():
     return psycopg2.connect(**DB_CONFIG)
@@ -59,6 +60,7 @@ def search(question, top_k=5, fetch_k=10):
     return issues, journals
 
 def ask(question):
+    client = get_client()
     issues, journals = search(question)
     
     issue_text = "\n".join([
