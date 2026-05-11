@@ -34,19 +34,49 @@ def get_conn():
 
 def search(question, top_k=5, fetch_k=10):
     vector = model.encode(question).tolist()
-    
+
+    # 키워드 추출 (2글자 이상)
+    keywords = [w for w in question.split() if len(w) >= 2]
+    keyword_condition = " OR ".join([
+        f"(subject ILIKE '%{k}%' OR description ILIKE '%{k}%')"
+        for k in keywords
+    ])
+
     conn = get_conn()
     cursor = conn.cursor()
-    
+
+    # 1. 벡터 검색
     cursor.execute("""
         SELECT issue_id, subject, description, created_on
         FROM redmine_issues
         ORDER BY embedding <-> %s::vector
         LIMIT %s
     """, (str(vector), fetch_k))
-    issues_raw = cursor.fetchall()
-    issues = sorted(issues_raw, key=lambda x: x[3] or '', reverse=True)[:top_k]
-    
+    vector_issues = cursor.fetchall()
+
+    # 2. 키워드 검색
+    keyword_issues = []
+    if keyword_condition:
+        cursor.execute(f"""
+            SELECT issue_id, subject, description, created_on
+            FROM redmine_issues
+            WHERE {keyword_condition}
+            ORDER BY created_on DESC
+            LIMIT %s
+        """, (fetch_k,))
+        keyword_issues = cursor.fetchall()
+
+    # 3. 합치기 (키워드 결과 우선, 중복 제거)
+    seen = set()
+    combined = []
+    for issue in keyword_issues + vector_issues:
+        if issue[0] not in seen:
+            seen.add(issue[0])
+            combined.append(issue)
+
+    issues = combined[:top_k]
+
+    # 저널 벡터 검색
     cursor.execute("""
         SELECT j.issue_id, j.notes, j.created_on
         FROM redmine_journals j
@@ -55,24 +85,24 @@ def search(question, top_k=5, fetch_k=10):
     """, (str(vector), fetch_k))
     journals_raw = cursor.fetchall()
     journals = sorted(journals_raw, key=lambda x: x[2] or '', reverse=True)[:top_k]
-    
+
     conn.close()
     return issues, journals
 
 def ask(question):
     client = get_client()
     issues, journals = search(question)
-    
+
     issue_text = "\n".join([
         f"[이슈 #{i[0]}] {i[1]} ({i[3]})\n{i[2][:500] if i[2] else ''}"
         for i in issues
     ])
-    
+
     journal_text = "\n".join([
         f"[이슈 #{j[0]} 답변] ({j[2]})\n{j[1][:500] if j[1] else ''}"
         for j in journals
     ])
-    
+
     prompt = f"""당신은 팜소프트 Redmine 이슈 관리 시스템의 전문 Q&A 챗봇입니다.
 
 ## 답변 규칙
@@ -80,7 +110,7 @@ def ask(question):
 2. 관련 이슈 번호를 반드시 언급하세요
 3. 답변은 아래 형식으로 작성하세요:
    - 📌 원인: 문제가 왜 발생했는지 최대한 상세하게
-   - 🔧 해결방법: 
+   - 🔧 해결방법:
      * 단계별로 번호 매겨서 설명
      * 각 단계마다 구체적인 명령어나 설정값 포함
      * 주의사항도 함께 작성
