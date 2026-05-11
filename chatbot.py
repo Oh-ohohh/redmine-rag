@@ -37,7 +37,9 @@ def search(question, top_k=5, fetch_k=10):
 
     # 키워드 추출 (2글자 이상)
     keywords = [w for w in question.split() if len(w) >= 2]
-    keyword_condition = " OR ".join([
+
+    # AND 조건 - 키워드 전부 포함된 이슈만
+    keyword_condition = " AND ".join([
         f"(subject ILIKE '%{k}%' OR description ILIKE '%{k}%')"
         for k in keywords
     ])
@@ -54,17 +56,20 @@ def search(question, top_k=5, fetch_k=10):
     """, (str(vector), fetch_k))
     vector_issues = cursor.fetchall()
 
-    # 2. 키워드 검색
+    # 2. 키워드 AND 검색
     keyword_issues = []
     if keyword_condition:
-        cursor.execute(f"""
-            SELECT issue_id, subject, description, created_on
-            FROM redmine_issues
-            WHERE {keyword_condition}
-            ORDER BY created_on DESC
-            LIMIT %s
-        """, (fetch_k,))
-        keyword_issues = cursor.fetchall()
+        try:
+            cursor.execute(f"""
+                SELECT issue_id, subject, description, created_on
+                FROM redmine_issues
+                WHERE {keyword_condition}
+                ORDER BY created_on DESC
+                LIMIT %s
+            """, (fetch_k,))
+            keyword_issues = cursor.fetchall()
+        except:
+            keyword_issues = []
 
     # 3. 합치기 (키워드 결과 우선, 중복 제거)
     seen = set()
