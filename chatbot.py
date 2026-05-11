@@ -32,7 +32,7 @@ def get_client():
 def get_conn():
     return psycopg2.connect(**DB_CONFIG)
 
-def search(question, top_k=5, fetch_k=10):
+def search(question, top_k=10, fetch_k=20):
     vector = model.encode(question).tolist()
     keywords = [w for w in question.split() if len(w) >= 2]
 
@@ -80,7 +80,7 @@ def search(question, top_k=5, fetch_k=10):
             seen.add(issue[0])
             combined.append(issue)
 
-    issues = combined[:top_k]
+    issues = combined[:10]
 
     # 저널 벡터 검색
     cursor.execute("""
@@ -90,7 +90,7 @@ def search(question, top_k=5, fetch_k=10):
         LIMIT %s
     """, (str(vector), fetch_k))
     journals_raw = cursor.fetchall()
-    journals = sorted(journals_raw, key=lambda x: x[2] or '', reverse=True)[:top_k]
+    journals = sorted(journals_raw, key=lambda x: x[2] or '', reverse=True)[:10]
 
     conn.close()
     return issues, journals
