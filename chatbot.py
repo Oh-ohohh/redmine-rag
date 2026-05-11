@@ -34,15 +34,7 @@ def get_conn():
 
 def search(question, top_k=5, fetch_k=10):
     vector = model.encode(question).tolist()
-
-    # 키워드 추출 (2글자 이상)
     keywords = [w for w in question.split() if len(w) >= 2]
-
-    # AND 조건 - 키워드 전부 포함된 이슈만
-    keyword_condition = " AND ".join([
-        f"(subject ILIKE '%{k}%' OR description ILIKE '%{k}%')"
-        for k in keywords
-    ])
 
     conn = get_conn()
     cursor = conn.cursor()
@@ -56,18 +48,27 @@ def search(question, top_k=5, fetch_k=10):
     """, (str(vector), fetch_k))
     vector_issues = cursor.fetchall()
 
-    # 2. 키워드 AND 검색
+    # 2. 키워드 점수제 검색
     keyword_issues = []
-    if keyword_condition:
+    if keywords:
+        score_cases = " + ".join([
+            f"(CASE WHEN subject ILIKE '%{k}%' OR description ILIKE '%{k}%' THEN 1 ELSE 0 END)"
+            for k in keywords
+        ])
+        or_condition = " OR ".join([
+            f"(subject ILIKE '%{k}%' OR description ILIKE '%{k}%')"
+            for k in keywords
+        ])
         try:
             cursor.execute(f"""
-                SELECT issue_id, subject, description, created_on
+                SELECT issue_id, subject, description, created_on,
+                       ({score_cases}) AS score
                 FROM redmine_issues
-                WHERE {keyword_condition}
-                ORDER BY created_on DESC
+                WHERE {or_condition}
+                ORDER BY score DESC, created_on DESC
                 LIMIT %s
             """, (fetch_k,))
-            keyword_issues = cursor.fetchall()
+            keyword_issues = [row[:4] for row in cursor.fetchall()]
         except:
             keyword_issues = []
 
