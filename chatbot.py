@@ -48,15 +48,15 @@ def search(question, top_k=10, fetch_k=20):
     """, (str(vector), fetch_k))
     vector_issues = cursor.fetchall()
 
-    # 2. 키워드 점수제 검색
+    # 2. 키워드 점수제 검색 (%% 로 이스케이프)
     keyword_issues = []
     if keywords:
         score_cases = " + ".join([
-            f"(CASE WHEN subject ILIKE '%{k}%' OR description ILIKE '%{k}%' THEN 1 ELSE 0 END)"
+            f"(CASE WHEN subject ILIKE '%%{k}%%' OR description ILIKE '%%{k}%%' THEN 1 ELSE 0 END)"
             for k in keywords
         ])
         or_condition = " OR ".join([
-            f"(subject ILIKE '%{k}%' OR description ILIKE '%{k}%')"
+            f"(subject ILIKE '%%{k}%%' OR description ILIKE '%%{k}%%')"
             for k in keywords
         ])
         try:
@@ -69,7 +69,9 @@ def search(question, top_k=10, fetch_k=20):
                 LIMIT %s
             """, (fetch_k,))
             keyword_issues = [row[:4] for row in cursor.fetchall()]
-        except:
+            print(f"키워드 검색 결과: {len(keyword_issues)}개")
+        except Exception as e:
+            print(f"키워드 검색 오류: {e}")
             keyword_issues = []
 
     # 3. 합치기 (키워드 결과 우선, 중복 제거)
@@ -106,10 +108,19 @@ def ask(question):
         for idx, i in enumerate(issues)
     ])
 
-    journal_text = "\n".join([
-        f"[이슈 #{j[0]} 답변] ({j[2]})\n{j[1][:500] if j[1] else ''}"
-        for j in journals
-    ])
+    # 상위 3개 이슈 저널 먼저, 상세하게
+    top_issue_ids = [i[0] for i in issues[:3]]
+    journal_text = ""
+    for issue_id in top_issue_ids:
+        issue_journals = [j for j in journals if j[0] == issue_id]
+        if issue_journals:
+            journal_text += f"\n=== 이슈 #{issue_id} 댓글 ===\n"
+            for j in issue_journals[:5]:
+                journal_text += f"({j[2]})\n{j[1][:800] if j[1] else ''}\n\n"
+
+    for j in journals:
+        if j[0] not in top_issue_ids:
+            journal_text += f"[이슈 #{j[0]} 답변] ({j[2]})\n{j[1][:300] if j[1] else ''}\n"
 
     prompt = f"""당신은 팜소프트 Redmine 이슈 관리 시스템의 전문 Q&A 챗봇입니다.
 
@@ -125,11 +136,10 @@ def ask(question):
      * 주의사항도 함께 작성
    - 📎 참고 이슈: 반드시 위 '관련 이슈 데이터'에 있는 이슈 번호만 언급하세요
    - 💡 추가 팁: 재발 방지 방법이나 관련 주의사항
-5. 비슷한 사례 이슈도 함께 언급하세요
-6. 데이터에 없는 내용은 추측하지 말고 "관련 이슈를 찾지 못했습니다" 라고 하세요
-7. 답변은 최대한 구체적으로, 실무자가 바로 적용할 수 있게 작성하세요
-8. 해결방법이 여러 개면 전부 나열하세요
-9. 이슈에 나온 실제 설정값, 경로, 명령어는 그대로 인용하세요
+5. 데이터에 없는 내용은 추측하지 말고 "관련 이슈를 찾지 못했습니다" 라고 하세요
+6. 답변은 최대한 구체적으로, 실무자가 바로 적용할 수 있게 작성하세요
+7. 해결방법이 여러 개면 전부 나열하세요
+8. 이슈에 나온 실제 설정값, 경로, 명령어는 그대로 인용하세요
 
 ## 관련 이슈 데이터
 {issue_text}
