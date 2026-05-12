@@ -39,16 +39,19 @@ def search(question, top_k=10, fetch_k=20):
     conn = get_conn()
     cursor = conn.cursor()
 
-    # 1. 벡터 검색
+    # 1. 벡터 검색 (유사도 점수 포함)
     cursor.execute("""
-        SELECT issue_id, subject, description, created_on
+        SELECT issue_id, subject, description, created_on,
+               embedding <-> %s::vector AS distance
         FROM redmine_issues
-        ORDER BY embedding <-> %s::vector
+        ORDER BY distance
         LIMIT %s
     """, (str(vector), fetch_k))
-    vector_issues = cursor.fetchall()
+    vector_results = cursor.fetchall()
+    best_distance = vector_results[0][4] if vector_results else 999
+    vector_issues = [r[:4] for r in vector_results]
 
-    # 2. 키워드 점수제 검색 (%% 로 이스케이프)
+    # 2. 키워드 점수제 검색
     keyword_issues = []
     if keywords:
         score_cases = " + ".join([
@@ -69,7 +72,6 @@ def search(question, top_k=10, fetch_k=20):
                 LIMIT %s
             """, (fetch_k,))
             keyword_issues = [row[:4] for row in cursor.fetchall()]
-            print(f"키워드 검색 결과: {len(keyword_issues)}개")
         except Exception as e:
             print(f"키워드 검색 오류: {e}")
             keyword_issues = []
@@ -97,11 +99,15 @@ def search(question, top_k=10, fetch_k=20):
     journals = cursor.fetchall()
 
     conn.close()
-    return issues, journals
+    return issues, journals, best_distance
 
 def ask(question):
     client = get_client()
-    issues, journals = search(question)
+    issues, journals, best_distance = search(question)
+
+    # 유사도가 너무 낮으면 답변 불가
+    if best_distance > 1.2:
+        return "죄송합니다. 질문과 관련된 이슈를 찾지 못했습니다. 😅\n\n좀 더 구체적으로 입력해주시면 정확한 답변을 드릴 수 있어요!\n\n**예시:**\n- 안정성시험 일지가 이전개정으로 붙는 오류\n- 로그인 시 500 오류 발생\n- 시험성적서 출력이 안됨", []
 
     issue_text = "\n".join([
         f"[이슈 #{i[0]}] {'⭐ 가장 관련성 높은 이슈' if idx == 0 else f'[{idx+1}순위]'} {i[1]} ({i[3]})\n{i[2][:800] if i[2] else ''}"
@@ -136,7 +142,7 @@ def ask(question):
      * 주의사항도 함께 작성
    - 📎 참고 이슈: 반드시 위 '관련 이슈 데이터'에 있는 이슈 번호만 언급하세요
    - 💡 추가 팁: 재발 방지 방법이나 관련 주의사항
-5. 데이터에 없는 내용은 추측하지 말고 "관련 이슈를 찾지 못했습니다" 라고 하세요
+5. 데이터와 관련 없는 질문이면 "관련 이슈를 찾지 못했습니다. 더 구체적으로 질문해주세요" 라고 하세요
 6. 답변은 최대한 구체적으로, 실무자가 바로 적용할 수 있게 작성하세요
 7. 해결방법이 여러 개면 전부 나열하세요
 8. 이슈에 나온 실제 설정값, 경로, 명령어는 그대로 인용하세요
@@ -158,7 +164,7 @@ def ask(question):
         messages=[
             {
                 'role': 'system',
-                'content': '당신은 팜소프트 Redmine 이슈 데이터 전문가입니다. 항상 한국어로 답변하고, ⭐ 표시된 이슈를 최우선으로 참고하며, 이슈 번호를 언급하고, 원인과 해결방법을 최대한 상세하고 구체적으로 설명합니다.'
+                'content': '당신은 팜소프트 Redmine 이슈 데이터 전문가입니다. 항상 한국어로 답변하고, ⭐ 표시된 이슈를 최우선으로 참고하며, 이슈 번호를 언급하고, 원인과 해결방법을 최대한 상세하고 구체적으로 설명합니다. 데이터와 무관한 질문은 정중히 거절하세요.'
             },
             {
                 'role': 'user',
