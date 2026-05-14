@@ -32,36 +32,22 @@ def get_client():
 def get_conn():
     return psycopg2.connect(**DB_CONFIG)
 
-def contains_keyword(issue, keywords):
-    text = f"{issue[1] or ''} {issue[2] or ''}".lower()
-    return any(k.lower() in text for k in keywords)
-
-def search(question, top_k=10, fetch_k=20):
+def search(question, fetch_k=20):
     vector = model.encode(question).tolist()
     keywords = [w for w in question.split() if len(w) >= 2]
 
     conn = get_conn()
     cursor = conn.cursor()
 
-    # 1. 벡터 검색 (유사도 점수 포함)
-    cursor.execute("""
-        SELECT issue_id, subject, description, created_on,
-               embedding <-> %s::vector AS distance
-        FROM redmine_issues
-        ORDER BY distance
-        LIMIT %s
-    """, (str(vector), fetch_k))
-    vector_results = cursor.fetchall()
-    best_distance = vector_results[0][4] if vector_results else 999
-    vector_issues = [r[:4] for r in vector_results]
+    issues = []
 
-    # 2. 키워드 점수제 검색
-    keyword_issues = []
     if keywords:
+        # 키워드가 있으면 반드시 키워드 포함된 것만 검색
         score_cases = " + ".join([
             f"(CASE WHEN subject ILIKE '%%{k}%%' OR description ILIKE '%%{k}%%' THEN 1 ELSE 0 END)"
             for k in keywords
         ])
+        # 모든 키워드 중 하나라도 포함된 것만
         or_condition = " OR ".join([
             f"(subject ILIKE '%%{k}%%' OR description ILIKE '%%{k}%%')"
             for k in keywords
@@ -75,27 +61,34 @@ def search(question, top_k=10, fetch_k=20):
                 ORDER BY score DESC, created_on DESC
                 LIMIT %s
             """, (fetch_k,))
-            keyword_issues = [row[:4] for row in cursor.fetchall()]
+            issues = [row[:4] for row in cursor.fetchall()]
         except Exception as e:
             print(f"키워드 검색 오류: {e}")
-            keyword_issues = []
+            issues = []
 
-    # 3. 합치기 (키워드 결과 우선, 중복 제거)
-    seen = set()
-    combined = []
-    for issue in keyword_issues + vector_issues:
-        if issue[0] not in seen:
-            seen.add(issue[0])
-            combined.append(issue)
+    # 키워드 검색 결과 없으면 벡터 검색으로 폴백
+    if not issues:
+        cursor.execute("""
+            SELECT issue_id, subject, description, created_on,
+                   embedding <-> %s::vector AS distance
+            FROM redmine_issues
+            ORDER BY distance
+            LIMIT %s
+        """, (str(vector), fetch_k))
+        issues = [r[:4] for r in cursor.fetchall()]
 
-    # 4. 키워드 포함된 이슈만 필터링
-    if keywords:
-        filtered = [i for i in combined if contains_keyword(i, keywords)]
-        issues = filtered[:10] if filtered else combined[:10]
-    else:
-        issues = combined[:10]
+    issues = issues[:10]
 
-    # 5. 찾은 이슈의 저널만 가져오기
+    # 유사도 점수 (관련성 판단용)
+    cursor.execute("""
+        SELECT embedding <-> %s::vector AS distance
+        FROM redmine_issues
+        ORDER BY distance
+        LIMIT 1
+    """, (str(vector),))
+    best_distance = cursor.fetchone()[0] if cursor.rowcount else 999
+
+    # 찾은 이슈의 저널만 가져오기
     issue_ids = [i[0] for i in issues]
     cursor.execute("""
         SELECT j.issue_id, j.notes, j.created_on
@@ -114,16 +107,14 @@ def ask(question):
     client = get_client()
     issues, journals, best_distance = search(question)
 
-    # 관련 이슈가 없으면 답변 불가
-    if not issues or best_distance > 1.5:
-        return "죄송합니다. 질문과 관련된 이슈를 찾지 못했습니다. 😅\n\n좀 더 구체적으로 입력해주시면 정확한 답변을 드릴 수 있어요!\n\n**예시:**\n- 안정성시험 일지가 이전개정으로 붙는 오류\n- 로그인 시 500 오류 발생\n- 시험성적서 출력이 안됨", []
+    if not issues:
+        return "죄송합니다. 질문과 관련된 이슈를 찾지 못했습니다. 😅\n\n좀 더 구체적으로 입력해주시면 정확한 답변을 드릴 수 있어요!\n\n**예시:**\n- 안정성시험 일지가 이전개정으로 붙는 오류\n- 산출물 보는 방법\n- 시험성적서 출력이 안됨", []
 
     issue_text = "\n".join([
         f"[이슈 #{i[0]}] {'⭐ 가장 관련성 높은 이슈' if idx == 0 else f'[{idx+1}순위]'} {i[1]} ({i[3]})\n{i[2][:800] if i[2] else ''}"
         for idx, i in enumerate(issues)
     ])
 
-    # 상위 3개 이슈 저널 먼저, 상세하게
     top_issue_ids = [i[0] for i in issues[:3]]
     journal_text = ""
     for issue_id in top_issue_ids:
