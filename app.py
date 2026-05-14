@@ -21,16 +21,13 @@ st.markdown("""
     .stChatMessage [data-testid="stChatMessageAvatarUser"] ~ div button {display: none;}
     [data-testid="stChatMessageContent"] .stActionButtonIcon {display: none;}
 
-    /* 전체 배경 */
     .stApp {background: linear-gradient(135deg, #0d1117 0%, #0f1623 100%);}
 
-    /* 사이드바 */
     [data-testid="stSidebar"] {
         background: linear-gradient(180deg, #111827 0%, #0d1117 100%);
         border-right: 1px solid #1f2937;
     }
 
-    /* 채팅 입력창 */
     [data-testid="stChatInput"] textarea {
         background-color: #1a2234 !important;
         border: 1px solid #2d3f5c !important;
@@ -39,7 +36,6 @@ st.markdown("""
         font-size: 15px !important;
     }
 
-    /* 봇 메시지 */
     [data-testid="stChatMessage"]:has([data-testid="stChatMessageAvatarAssistant"]) {
         background: linear-gradient(135deg, #1a2234 0%, #151e2e 100%);
         border-radius: 16px;
@@ -49,7 +45,6 @@ st.markdown("""
         box-shadow: 0 4px 15px rgba(0,0,0,0.2);
     }
 
-    /* 유저 메시지 */
     [data-testid="stChatMessage"]:has([data-testid="stChatMessageAvatarUser"]) {
         background: linear-gradient(135deg, #1a3a5c 0%, #152d4a 100%);
         border-radius: 16px;
@@ -59,7 +54,6 @@ st.markdown("""
         box-shadow: 0 4px 15px rgba(0,0,0,0.2);
     }
 
-    /* expander */
     [data-testid="stExpander"] {
         background: #0d1117;
         border: 1px solid #1f2937;
@@ -67,7 +61,16 @@ st.markdown("""
         margin-top: 8px;
     }
 
-    /* 통계 카드 */
+    /* 링크 스타일 */
+    [data-testid="stExpander"] a {
+        color: #60a5fa !important;
+        text-decoration: none !important;
+    }
+    [data-testid="stExpander"] a:hover {
+        color: #93c5fd !important;
+        text-decoration: underline !important;
+    }
+
     .stat-card {
         background: linear-gradient(135deg, #1a2234 0%, #151e2e 100%);
         border: 1px solid #2d3f5c;
@@ -89,7 +92,6 @@ st.markdown("""
         margin-top: 4px;
     }
 
-    /* 사이드바 타이틀 */
     .sidebar-title {
         font-size: 20px;
         font-weight: 700;
@@ -99,14 +101,12 @@ st.markdown("""
         margin-bottom: 20px;
     }
 
-    /* 구분선 */
     .custom-divider {
         border: none;
         border-top: 1px solid #1f2937;
         margin: 16px 0;
     }
 
-    /* 메인 타이틀 */
     .main-title {
         font-size: 32px;
         font-weight: 800;
@@ -121,26 +121,30 @@ st.markdown("""
         margin-bottom: 24px;
     }
 
-    /* 초기화 버튼 */
     .stButton button {
         background: linear-gradient(135deg, #1e3a5f, #2d4a7a) !important;
         color: #93c5fd !important;
         border: 1px solid #2d5a8c !important;
         border-radius: 10px !important;
         font-weight: 600 !important;
-        transition: all 0.2s !important;
     }
     .stButton button:hover {
         background: linear-gradient(135deg, #2d4a7a, #3d5a8a) !important;
         border-color: #60a5fa !important;
     }
 
-    /* 스크롤바 */
     ::-webkit-scrollbar {width: 6px;}
     ::-webkit-scrollbar-track {background: #0d1117;}
     ::-webkit-scrollbar-thumb {background: #2d3f5c; border-radius: 3px;}
 </style>
 """, unsafe_allow_html=True)
+
+REDMINE_URL = "http://mine.pharmsoft.co.kr/redmine/issues"
+
+def render_issues(issues):
+    for issue in issues:
+        url = f"{REDMINE_URL}/{issue[0]}"
+        st.markdown(f"- [**이슈 #{issue[0]}**: {issue[1]}]({url})")
 
 # 사이드바
 with st.sidebar:
@@ -186,8 +190,7 @@ for msg in st.session_state.messages:
         st.markdown(msg["content"])
         if "issues" in msg and msg["issues"]:
             with st.expander("📎 참조 이슈 보기"):
-                for issue in msg["issues"]:
-                    st.markdown(f"- **이슈 #{issue[0]}**: {issue[1]}")
+                render_issues(msg["issues"])
 
 # 입력
 if question := st.chat_input("증상이나 오류를 입력하세요..."):
@@ -204,8 +207,7 @@ if question := st.chat_input("증상이나 오류를 입력하세요..."):
         st.markdown(answer)
         if issues:
             with st.expander("📎 참조 이슈 보기"):
-                for issue in issues:
-                    st.markdown(f"- **이슈 #{issue[0]}**: {issue[1]}")
+                render_issues(issues)
 
     st.session_state.messages.append({
         "role": "assistant",
