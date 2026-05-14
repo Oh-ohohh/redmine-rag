@@ -32,6 +32,10 @@ def get_client():
 def get_conn():
     return psycopg2.connect(**DB_CONFIG)
 
+def contains_keyword(issue, keywords):
+    text = f"{issue[1] or ''} {issue[2] or ''}".lower()
+    return any(k.lower() in text for k in keywords)
+
 def search(question, top_k=10, fetch_k=20):
     vector = model.encode(question).tolist()
     keywords = [w for w in question.split() if len(w) >= 2]
@@ -84,9 +88,14 @@ def search(question, top_k=10, fetch_k=20):
             seen.add(issue[0])
             combined.append(issue)
 
-    issues = combined[:10]
+    # 4. 키워드 포함된 이슈만 필터링
+    if keywords:
+        filtered = [i for i in combined if contains_keyword(i, keywords)]
+        issues = filtered[:10] if filtered else combined[:10]
+    else:
+        issues = combined[:10]
 
-    # 4. 찾은 이슈의 저널만 가져오기
+    # 5. 찾은 이슈의 저널만 가져오기
     issue_ids = [i[0] for i in issues]
     cursor.execute("""
         SELECT j.issue_id, j.notes, j.created_on
@@ -105,8 +114,8 @@ def ask(question):
     client = get_client()
     issues, journals, best_distance = search(question)
 
-    # 유사도가 너무 낮으면 답변 불가
-    if best_distance > 1.5:
+    # 관련 이슈가 없으면 답변 불가
+    if not issues or best_distance > 1.5:
         return "죄송합니다. 질문과 관련된 이슈를 찾지 못했습니다. 😅\n\n좀 더 구체적으로 입력해주시면 정확한 답변을 드릴 수 있어요!\n\n**예시:**\n- 안정성시험 일지가 이전개정으로 붙는 오류\n- 로그인 시 500 오류 발생\n- 시험성적서 출력이 안됨", []
 
     issue_text = "\n".join([
@@ -165,7 +174,7 @@ def ask(question):
         messages=[
             {
                 'role': 'system',
-                'content': '당신은 팜소프트 Redmine 이슈 관리 시스템의 전문 Q&A 챗봇입니다. 사용자가 짧거나 구어체로 질문해도 의도를 파악하여 관련 이슈를 찾아 답변하세요. 예를 들어 "안정성 일지 왜 이상해?" 같은 질문도 관련 이슈를 찾아 답변할 수 있어야 합니다. 항상 한국어로 답변하고 ⭐ 표시된 이슈를 최우선으로 참고하세요.'
+                'content': '당신은 팜소프트 Redmine 이슈 관리 시스템의 전문 Q&A 챗봇입니다. 사용자가 짧거나 구어체로 질문해도 의도를 파악하여 관련 이슈를 찾아 답변하세요. 항상 한국어로 답변하고 ⭐ 표시된 이슈를 최우선으로 참고하세요.'
             },
             {
                 'role': 'user',
