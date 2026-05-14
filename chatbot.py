@@ -46,11 +46,11 @@ def get_conn():
 
 def search(question, fetch_k=30):
     """
-    검색 개선 방향:
+    검색 방식:
     1. 벡터 검색은 항상 수행
-    2. 키워드 검색도 보조로 수행
-    3. 두 결과를 병합
-    4. 키워드만 맞는 이슈가 과도하게 우선되지 않도록 벡터 검색에 더 높은 점수 부여
+    2. 키워드 검색은 보조로 수행
+    3. 두 결과를 병합 후 점수화
+    4. 최종 상위 10개 후보만 반환
     """
 
     vector = model.encode(question).tolist()
@@ -125,9 +125,12 @@ def search(question, fetch_k=30):
                 keyword_score = 0
 
                 for k in keywords:
-                    if k.lower() in subject_text.lower():
+                    keyword = k.lower()
+
+                    if keyword in subject_text.lower():
                         keyword_score += 3
-                    if k.lower() in description_text.lower():
+
+                    if keyword in description_text.lower():
                         keyword_score += 1
 
                 if issue_id not in merged:
@@ -152,8 +155,7 @@ def search(question, fetch_k=30):
         for issue in merged.values():
             score = 0
 
-            # 벡터 검색 순위 가중치
-            # 하드코딩 불용어 없이 의미 기반 검색을 메인으로 사용
+            # 벡터 검색을 메인으로 사용
             if issue["vector_rank"] is not None:
                 score += 100 / (issue["vector_rank"] + 10)
 
@@ -161,7 +163,7 @@ def search(question, fetch_k=30):
             if issue["keyword_score"]:
                 score += min(issue["keyword_score"], 10)
 
-            # 키워드 검색 순위 보조 가중치
+            # 키워드 순위 보조 점수
             if issue["keyword_rank"] is not None:
                 score += 20 / (issue["keyword_rank"] + 10)
 
@@ -173,7 +175,6 @@ def search(question, fetch_k=30):
             reverse=True,
         )
 
-        # 최종 10개만 사용
         selected = sorted_issues[:10]
 
         issues = [
@@ -186,15 +187,15 @@ def search(question, fetch_k=30):
             for i in selected
         ]
 
-        # =========================
-        # 4. 저널 조회
-        # =========================
         issue_ids = [i[0] for i in issues]
 
         if not issue_ids:
             conn.close()
             return [], [], best_distance
 
+        # =========================
+        # 4. 저널 조회
+        # =========================
         cursor.execute(
             """
             SELECT j.issue_id, j.notes, j.created_on
@@ -216,6 +217,26 @@ def search(question, fetch_k=30):
         conn.close()
         print(f"검색 오류: {e}")
         return [], [], 999
+
+
+def is_no_result_answer(answer):
+    """
+    Groq가 관련 이슈 없음으로 판단한 경우,
+    참조 이슈도 같이 숨기기 위한 함수
+    """
+
+    if not answer:
+        return False
+
+    no_result_messages = [
+        "관련 이슈를 찾지 못했습니다",
+        "관련된 이슈를 찾지 못했습니다",
+        "더 구체적으로 질문해주세요",
+        "관련 이슈가 없습니다",
+        "직접 관련된 이슈를 찾지 못했습니다",
+    ]
+
+    return any(msg in answer for msg in no_result_messages)
 
 
 def ask(question):
@@ -291,6 +312,7 @@ def ask(question):
 6. 데이터와 관련 없는 질문이면 "관련 이슈를 찾지 못했습니다. 더 구체적으로 질문해주세요"라고 하세요.
 7. 이슈 데이터에 없는 내용은 추측하지 마세요.
 8. 원인이나 해결방법이 명확하지 않으면 "이슈 내 확인 불가" 또는 "추가 확인 필요"라고 작성하세요.
+9. 질문과 직접 관련 없는 이슈는 참고하지 마세요.
 
 ## 관련 이슈 데이터
 {issue_text}
@@ -313,7 +335,8 @@ def ask(question):
                     "content": (
                         "당신은 팜소프트 Redmine 이슈 관리 시스템의 전문 Q&A 챗봇입니다. "
                         "반드시 한국어로 답변하고, 제공된 이슈 데이터 안에서만 답변하세요. "
-                        "없는 내용은 추측하지 마세요."
+                        "없는 내용은 추측하지 마세요. "
+                        "질문과 직접 관련 없는 이슈라면 관련 이슈를 찾지 못했다고 답변하세요."
                     ),
                 },
                 {
@@ -325,7 +348,14 @@ def ask(question):
             max_tokens=1200,
         )
 
-        return response.choices[0].message.content, issues
+        answer = response.choices[0].message.content
+
+        # 중요:
+        # 답변이 "관련 이슈 없음"이면 참조 이슈도 표시하지 않도록 빈 배열 반환
+        if is_no_result_answer(answer):
+            return answer, []
+
+        return answer, issues
 
     except Exception as e:
         error_type = type(e).__name__
@@ -357,7 +387,8 @@ def ask(question):
             "4. 요청 프롬프트 길이 초과 여부 확인"
         )
 
-        return error_message, issues
+        # API 오류가 난 경우에는 참조 이슈를 보여주면 혼란스러우므로 빈 배열 반환
+        return error_message, []
 
 
 if __name__ == "__main__":
